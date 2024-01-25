@@ -6,6 +6,7 @@ import math
 from scipy.optimize import fsolve
 import numpy as np
 import os
+from datetime import datetime
 
 class Pair:
     def __init__(self, tpLimit, resources, weight):
@@ -51,6 +52,7 @@ class Resource:
     def __eq__(self,other):
         if isinstance(other, Resource):
             return self._hashVal == other._hashVal
+        
     def updateLimit(self,new_limit):
         self._tpUserLimit = new_limit
     
@@ -71,6 +73,7 @@ class Resource:
     
     def getActualTput(self):
         return self.quadFunc(self._currentTputSetpoint)
+    
     def leftEdgeFunc(self, setpoint):
         return self._optimalTput/ np.sqrt(-setpoint + (.5 * self._optimalTput))
     
@@ -116,8 +119,8 @@ class Network:
         # Initialize pairs
         self._pairs = []
         for _ in range(num_pairs):
-            tp_limit =  random.random() * 100 # Adjust the range as needed
-            resource_indicies = random.sample(range(len(self._resources)), random.randint(1, len(self._resources)))
+            tp_limit =  random.random() * 100 # Adjust the range as needed, change this!!!! to be based on resource limits U_r / numPairsweighted 
+            resource_indicies = random.sample(range(len(self._resources)), random.randint(1, len(self._resources))) # change this to just pick one
             resources = [self._resources[i] for i in resource_indicies]
             pair = Pair(tp_limit, resources, random.random() * 100) #first resource is dest
             self._pairs.append(pair)
@@ -145,9 +148,10 @@ class Network:
     
     def init_tput(self):
         for dest in self._destinations:
-            tput = random.randint(1,2 * dest._optimalTput)
+            #tput = random.randint(1,2 * dest._optimalTput)
+            tput = dest._tpUserLimit
             dest._currentTputSetpoint = tput
-            dest._totUserWeights = 0
+            dest._totUserWeights = 0 
             for pair in self._destinations[dest]:
                 dest._totUserWeights += pair.getWeight()
             for pair in self._destinations[dest]:
@@ -213,6 +217,7 @@ class Network:
         print("\t limit:", dest.getLimit())
         print("\t decision: ", decision)
         print("\t new setpoint: ", newSetpoint)
+        print("\t tot user weights: ", dest._totUserWeights)
         
     
     def printState(self):
@@ -235,7 +240,7 @@ class Network:
             print("Dest: Resource ", self._pairs[i]._destination._hashVal)
 
     def optimizerIteration(self):
-        alpha = 2
+        alpha = 0.1
         beta = 0.75
         bigBeta = 0.6 #for when user limit excedded
 
@@ -254,10 +259,10 @@ class Network:
             decision = ""
             #adjust setpoint
             if gradient >= 0 and dest._currentTput < dest.getLimit():
-                newSetpoint = dest._currentTputSetpoint + alpha
+                newSetpoint = dest._currentTputSetpoint + (alpha * dest._totUserWeights) # change alpha 
                 decision = "increase"
             elif dest._currentTput > dest.getLimit():
-                newSetpoint = dest._currentTputSetpoint * bigBeta
+                newSetpoint = dest._currentTputSetpoint * bigBeta 
                 decision = "decrease: user limit"
             else:
                 newSetpoint = dest._currentTputSetpoint * beta
@@ -266,8 +271,10 @@ class Network:
             self.printDestState(dest, gradient, decision, newSetpoint)
             dest._prevTputSetpoint = dest._currentTputSetpoint
             dest._prevTput = dest._currentTput
-            
-            dest._currentTputSetpoint = newSetpoint
+
+           
+            dest._currentTputSetpoint = newSetpoint 
+
 
             for pair in self._destinations[dest]:
                 newTput = dest._currentTputSetpoint * (pair.getWeight()/dest._totUserWeights)
@@ -318,8 +325,9 @@ def main():
     print(data)
 
 
-    # Specify the path for the new folder
-    folder_path = '/Users/samdetor/networkSim/' + str(random.randint(1,100)) + '/'
+    # Specify the path for the new folder 
+    timestamp_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    folder_path = os.path.join('/Users/jennymao/Documents/repos/NetworkSimulation/', f"folder_{timestamp_str}/")
 
     # Create the new folder
     try:
