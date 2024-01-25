@@ -1,4 +1,3 @@
-
 import random
 import string
 import matplotlib.pyplot as plt
@@ -8,6 +7,10 @@ import numpy as np
 import os
 from datetime import datetime
 
+
+########################################
+# Pair Functions 
+########################################
 class Pair:
     def __init__(self, tpLimit, resources, weight):
         self._tpLimit = tpLimit
@@ -35,7 +38,9 @@ class Pair:
         return self._destination
 
 
-
+########################################
+# Resource Functions 
+########################################
 class Resource:
     def __init__(self, tpLimit, id, optTput):
         self._tpUserLimit = tpLimit
@@ -69,13 +74,19 @@ class Resource:
         return (-1/self._optimalTput) * (setpoint - self._optimalTput) * (setpoint - self._optimalTput) + self._optimalTput
     
     def rightEdgeFunc(self, setpoint):
-        return self._optimalTput/ np.sqrt(setpoint - (1.5 * self._optimalTput))
-    
-    def getActualTput(self):
-        return self.quadFunc(self._currentTputSetpoint)
+        return (2 * self._optimalTput) - (setpoint)
     
     def leftEdgeFunc(self, setpoint):
         return self._optimalTput/ np.sqrt(-setpoint + (.5 * self._optimalTput))
+    
+    def getActualTput(self):
+        actualTput = self._currentTputSetpoint
+        # if greater than optimal tput, the actual tput will begin to decrease (neg gradient)
+        if self._currentTputSetpoint > self._optimalTput: 
+            actualTput = self.rightEdgeFunc(self._currentTputSetpoint)
+
+        return actualTput 
+    
     
     """  def getActualTput(self):
         if(self._currentTputSetpoint - (1.5 * self._optimalTput) > 0 and self.rightEdgeFunc(self._currentTputSetpoint) < (self._optimalTput * 0.8)):
@@ -86,6 +97,10 @@ class Resource:
             return self.quadFunc(self._currentTputSetpoint)
  """
 
+
+########################################
+# Network Functions 
+########################################
 class Network:
     
     def __init__(self, resources, pairs, destinations, pairIndictorFunction, resourceIndicatorFunction):
@@ -122,7 +137,8 @@ class Network:
             tp_limit =  random.random() * 100 # Adjust the range as needed, change this!!!! to be based on resource limits U_r / numPairsweighted 
             resource_indicies = random.sample(range(len(self._resources)), random.randint(1, len(self._resources))) # change this to just pick one
             resources = [self._resources[i] for i in resource_indicies]
-            pair = Pair(tp_limit, resources, random.random() * 100) #first resource is dest
+            #pair = Pair(tp_limit, resources, random.random() * 10) #first resource is dest
+            pair = Pair(tp_limit, resources, 1)
             self._pairs.append(pair)
             
             #update destinations map
@@ -219,7 +235,6 @@ class Network:
         print("\t new setpoint: ", newSetpoint)
         print("\t tot user weights: ", dest._totUserWeights)
         
-    
     def printState(self):
         i = 0
         print("Resources\n")
@@ -239,43 +254,59 @@ class Network:
             print("Pair ", i)
             print("Dest: Resource ", self._pairs[i]._destination._hashVal)
 
+    ########################################
+    # Optimizer Iteration 
+    ########################################
     def optimizerIteration(self):
-        alpha = 0.1
+        alpha = 1
         beta = 0.75
-        bigBeta = 0.6 #for when user limit excedded
+        bigBeta = 0.6 #for when user limit exceeded
 
         #self.updateResourceTput()
         for dest in self._destinations:
             dest._currentTput = dest.getActualTput()
-
-            deltaTput = dest._currentTput - dest._prevTput
-            deltaSetpoint = dest._currentTputSetpoint - dest._prevTputSetpoint
-
-            if(deltaSetpoint != 0):
-                gradient = (dest._currentTput - dest._prevTput)/(dest._currentTputSetpoint - dest._prevTputSetpoint)
-            else:
-                gradient = 1 #hack for zero gradient, idk what to do here for sure
-           
-            decision = ""
-            #adjust setpoint
-            if gradient >= 0 and dest._currentTput < dest.getLimit():
-                newSetpoint = dest._currentTputSetpoint + (alpha * dest._totUserWeights) # change alpha 
-                decision = "increase"
-            elif dest._currentTput > dest.getLimit():
-                newSetpoint = dest._currentTputSetpoint * bigBeta 
-                decision = "decrease: user limit"
-            else:
-                newSetpoint = dest._currentTputSetpoint * beta
-                decision = "decrease: opt"
             
-            self.printDestState(dest, gradient, decision, newSetpoint)
-            dest._prevTputSetpoint = dest._currentTputSetpoint
-            dest._prevTput = dest._currentTput
 
-           
-            dest._currentTputSetpoint = newSetpoint 
+            # if we do not have previous information about this resource 
+            # set at the user specified limit 
+            if dest._prevTputSetpoint == 0:
+                tput = min(dest._tpUserLimit,  (2 * dest._optimalTput - 1))
+                dest._currentTputSetpoint = tput
+                dest._currentTput = dest.getActualTput()
+                dest._prevTputSetpoint = tput
+                dest._prevTput = dest._currentTput
+            
+            # we have previous information to optimize on 
+            else: 
+                deltaTput = dest._currentTput - dest._prevTput
+                deltaSetpoint = dest._currentTputSetpoint - dest._prevTputSetpoint
 
+                if(deltaSetpoint != 0):
+                    gradient = (deltaTput)/(deltaSetpoint)
+                else:
+                    gradient = 1 #hack for zero gradient, idk what to do here for sure
+            
+                decision = ""
+                #adjust setpoint
+                if gradient >= 0 and dest._currentTput < dest.getLimit():
+                    # increase setpoint up to user specified limit 
+                    newSetpoint = min(dest._tpUserLimit, (2 * dest._optimalTput - 1), dest._currentTputSetpoint + (alpha * dest._totUserWeights)) 
+                    decision = "increase"
 
+                elif dest._currentTput > dest.getLimit():
+                    newSetpoint = dest._currentTputSetpoint * bigBeta 
+                    decision = "decrease: user limit"
+                else:
+                    newSetpoint = dest._currentTputSetpoint * beta
+                    decision = "decrease: opt"
+                
+                self.printDestState(dest, gradient, decision, newSetpoint)
+                dest._prevTputSetpoint = dest._currentTputSetpoint
+                dest._prevTput = dest._currentTput
+            
+                dest._currentTputSetpoint = newSetpoint
+
+            # propogate new setpoint to pairs
             for pair in self._destinations[dest]:
                 newTput = dest._currentTputSetpoint * (pair.getWeight()/dest._totUserWeights)
                 pair.updateTput(newTput)
@@ -296,7 +327,12 @@ class Network:
 
 
 
+########################################
+# Indicator Functions 
+########################################
 
+# currently unused
+# TODO: add pair success rate indicator function 
 def myPairIndicatorFunction(pair, maxC, minCVal, gradient):
     beta = 0.9
     alpha = 1
@@ -305,38 +341,49 @@ def myPairIndicatorFunction(pair, maxC, minCVal, gradient):
     else:
         return (maxC * pair.getWeight()/pair._destination._totUserWeights) + (alpha * pair.getWeight()/pair._destination._totUserWeights)
     
+# currently unused 
 def myResourceIndicatorFunction(pair):
-    #proposedDecreases = list()
-    #for resource in pair._resources:
+    # if exceeded resource limit, calculate the new proportional allocation for pair  
     if pair._resources[0]._currentTput > pair._resources[0].getLimit():
-        #proposedDecreases.append(resource.getLimit() * pair.getWeight()/resource._totUserWeights)
         return pair._resources[0].getLimit() * pair.getWeight()/pair._resources[0]._totUserWeights
     else:
         return float('inf')
-    #if len(proposedDecreases) == 0:
-        #return float('inf')
-    #return min(proposedDecreases) 
+
+
+
+
 
 
 def main():
-    myNetwork = Network(4,20,myPairIndicatorFunction,myResourceIndicatorFunction)
+    #  network parameters 
+    numResources = 4 
+    numPairs = 20 
+    numIterations = 30 
+
+    # initialize network simulation 
+    myNetwork = Network(numResources, numPairs, myPairIndicatorFunction,myResourceIndicatorFunction)
     myNetwork.printNetworkState()
-    data = myNetwork.simulate(30)
+    data = myNetwork.simulate(numIterations)
     print(data)
 
 
-    # Specify the path for the new folder 
-    timestamp_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    # save plots 
+    timestamp_str = datetime.now().strftime("%m-%d_%H-%M-%S")
     folder_path = os.path.join('/Users/jennymao/Documents/repos/NetworkSimulation/', f"folder_{timestamp_str}/")
 
-    # Create the new folder
+    # create the new folder
     try:
         os.makedirs(folder_path)
         print(f"New folder '{folder_path}' created successfully.")
     except OSError as e:
         print(f"Error creating folder: {e}")
 
-    # Plot 1
+
+
+    ################################################
+    # Plot 1: All Pairs 
+    ################################################
+        
     #plt.subplot(3, 1, 1)  # 3 rows, 1 column, plot 1
     for i in range(len(data[1])):
         myLabel1 = "Pair" + str(i)+ "Throuput"
@@ -348,7 +395,13 @@ def main():
 
     plt.savefig(folder_path + "Pairs.png")
     plt.clf()
-    # Plot 3
+
+
+
+    #############################################
+    # Plot 2: Destinations (1 plot for each dest)
+    #############################################
+    
     #plt.subplot(3, 1, 3)  # 3 rows, 1 column, plot 3
     for i in range(len(data[3])):
         plt.clf()
@@ -363,7 +416,12 @@ def main():
         plt.savefig(folder_path + "Destination" + str(i) + ".png")
 
     plt.clf()
-    # Plot 2
+
+
+    ################################################
+    # Plot 3: All Resources 
+    ################################################
+        
     #plt.subplot(3, 1, 2)  # 3 rows, 1 column, plot 2
     print("Data 3:", data[6])
     print("Data 3 len:", data[6])
@@ -376,12 +434,6 @@ def main():
     plt.legend()
     plt.savefig(folder_path + "Resources.png")
 
-    # Adjust layout for better spacing
-    #plt.tight_layout()
-
-    # Show the plots
-   
-    
 
 
 
