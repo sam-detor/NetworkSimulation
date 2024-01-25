@@ -74,7 +74,7 @@ class Resource:
         return (-1/self._optimalTput) * (setpoint - self._optimalTput) * (setpoint - self._optimalTput) + self._optimalTput
     
     def rightEdgeFunc(self, setpoint):
-        return (2 * self._optimalTput) - (setpoint)
+        return (1.25 * self._optimalTput) - (0.25 * setpoint)
     
     def leftEdgeFunc(self, setpoint):
         return self._optimalTput/ np.sqrt(-setpoint + (.5 * self._optimalTput))
@@ -113,6 +113,7 @@ class Network:
         self._resource_data =  [[] for _ in range(len(resources))]
         self._pair_data = [[] for _ in range(len(pairs))]
         self._destination_data = [[] for _ in range(len(destinations))]
+        self._destination_tput_setpoint = [[] for _ in range(len(destinations))]
         self._resource_limits =  [[] for _ in range(len(resources))]
         self._pair_limits = [[] for _ in range(len(pairs))]
         self._destination_limits = [[] for _ in range(len(destinations))]
@@ -134,7 +135,7 @@ class Network:
         # Initialize pairs
         self._pairs = []
         for _ in range(num_pairs):
-            tp_limit =  random.random() * 100 # Adjust the range as needed, change this!!!! to be based on resource limits U_r / numPairsweighted 
+            tp_limit =  100 # Adjust the range as needed, change this!!!! to be based on resource limits U_r / numPairsweighted 
             resource_indicies = random.sample(range(len(self._resources)), random.randint(1, len(self._resources))) # change this to just pick one
             resources = [self._resources[i] for i in resource_indicies]
             #pair = Pair(tp_limit, resources, random.random() * 10) #first resource is dest
@@ -151,6 +152,7 @@ class Network:
         self._resource_data =  [[] for _ in range(len(self._resources))]
         self._pair_data = [[] for _ in range(len(self._pairs))]
         self._destination_data = [[] for _ in range(len(self._destinations))]
+        self._destination_tput_setpoint = [[] for _ in range(len(self._destinations))]
 
         self._resource_limits =  [[] for _ in range(len(self._resources))]
         self._pair_limits = [[] for _ in range(len(self._pairs))]
@@ -165,7 +167,7 @@ class Network:
     def init_tput(self):
         for dest in self._destinations:
             #tput = random.randint(1,2 * dest._optimalTput)
-            tput = dest._tpUserLimit
+            tput = min(dest._tpUserLimit,  (5 * dest._optimalTput - 1))
             dest._currentTputSetpoint = tput
             dest._totUserWeights = 0 
             for pair in self._destinations[dest]:
@@ -208,6 +210,7 @@ class Network:
 
         i = 0
         for dest in self._destinations:
+            self._destination_tput_setpoint[i].append(dest._prevTputSetpoint) # or current?
             self._destination_data[i].append(dest._currentTput)
             self._destination_limits[i].append(dest.getLimit())
             self._destination_optimal[i].append(dest._optimalTput)
@@ -217,6 +220,7 @@ class Network:
         self._x_values = list()
         self._resource_data =  [[] for _ in range(len(self._resources))]
         self._pair_data = [[] for _ in range(len(self._pairs))]
+        self._destination_data = [[] for _ in range(len(self._destinations))]
         self._destination_data = [[] for _ in range(len(self._destinations))]
         self._resource_limits =  [[] for _ in range(len(self._resources))]
         self._pair_limits = [[] for _ in range(len(self._pairs))]
@@ -264,20 +268,19 @@ class Network:
 
         #self.updateResourceTput()
         for dest in self._destinations:
-            dest._currentTput = dest.getActualTput()
-            
-
+        
             # if we do not have previous information about this resource 
             # set at the user specified limit 
             if dest._prevTputSetpoint == 0:
-                tput = min(dest._tpUserLimit,  (2 * dest._optimalTput - 1))
+                tput = min(dest._tpUserLimit,  (5 * dest._optimalTput - 1))
                 dest._currentTputSetpoint = tput
                 dest._currentTput = dest.getActualTput()
-                dest._prevTputSetpoint = tput
-                dest._prevTput = dest._currentTput
+                dest._prevTputSetpoint = tput # this forces the gradient to be negative -- do we want this?
+                dest._prevTput = dest._currentTput 
             
             # we have previous information to optimize on 
             else: 
+                dest._currentTput = dest.getActualTput()
                 deltaTput = dest._currentTput - dest._prevTput
                 deltaSetpoint = dest._currentTputSetpoint - dest._prevTputSetpoint
 
@@ -287,12 +290,12 @@ class Network:
                     gradient = 1 #hack for zero gradient, idk what to do here for sure
             
                 decision = ""
+            
                 #adjust setpoint
-                if gradient >= 0 and dest._currentTput < dest.getLimit():
+                if gradient >= 0 and dest._currentTputSetpoint < dest.getLimit():
                     # increase setpoint up to user specified limit 
                     newSetpoint = min(dest._tpUserLimit, (2 * dest._optimalTput - 1), dest._currentTputSetpoint + (alpha * dest._totUserWeights)) 
                     decision = "increase"
-
                 elif dest._currentTput > dest.getLimit():
                     newSetpoint = dest._currentTputSetpoint * bigBeta 
                     decision = "decrease: user limit"
@@ -322,7 +325,9 @@ class Network:
         for i in range(numIterations):
             self.optimizerIteration()
         
-        return self._x_values, self._pair_data, self._pair_limits, self._destination_data, self._destination_limits, self._destination_optimal, self._resource_data, self._resource_limits
+        return self._x_values, self._pair_data, self._pair_limits, self._destination_data, \
+                        self._destination_limits, self._destination_optimal, self._destination_tput_setpoint, \
+                        self._resource_data, self._resource_limits
         
 
 
@@ -408,14 +413,18 @@ def main():
         myLabel1 = "Dest" + str(i) + "Throuput"
         myLabel2 = "Dest" + str(i) + "Limit"
         myLabel3 = "Dest" + str(i) + "Opt"
+        myLabel4 = "Dest" + str(i) + "Target"
         plt.plot(data[0], data[3][i], label=myLabel1)
         plt.plot(data[0], data[4][i], label=myLabel2)
         plt.plot(data[0], data[5][i], label=myLabel3)
+        plt.plot(data[0], data[6][i], label=myLabel4)
         plt.title("Destination" + str(i))
         plt.legend()
         plt.savefig(folder_path + "Destination" + str(i) + ".png")
 
     plt.clf()
+
+    # how can i print out the goal setpoint  
 
 
     ################################################
@@ -423,13 +432,13 @@ def main():
     ################################################
         
     #plt.subplot(3, 1, 2)  # 3 rows, 1 column, plot 2
-    print("Data 3:", data[6])
-    print("Data 3 len:", data[6])
-    for i in range(len(data[6])):
+    print("Data 3:", data[7])
+    print("Data 3 len:", data[7])
+    for i in range(len(data[7])):
         myLabel1 = "Resource" + str(i) + "Throuput"
         myLabel2 = "Resource" + str(i) + "Limit"
-        plt.plot(data[0], data[6][i], label=myLabel1)
-        plt.plot(data[0], data[7][i], label=myLabel2)
+        plt.plot(data[0], data[7][i], label=myLabel1)
+        plt.plot(data[0], data[8][i], label=myLabel2)
     plt.title('Resources')
     plt.legend()
     plt.savefig(folder_path + "Resources.png")
