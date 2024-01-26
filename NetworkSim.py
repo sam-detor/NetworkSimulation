@@ -6,13 +6,15 @@ from scipy.optimize import fsolve
 import numpy as np
 import os
 from datetime import datetime
+from collections import defaultdict
 
 
 ########################################
 # Pair Functions 
 ########################################
 class Pair:
-    def __init__(self, tpLimit, resources, weight):
+    def __init__(self, idNum, tpLimit, resources, weight):
+        self._id = idNum
         self._tpLimit = tpLimit
         self._resources = resources #first element in resource array is the destination
         self._destination = resources[0]
@@ -34,6 +36,9 @@ class Pair:
     def getWeight(self):
        return self._weight
 
+    def getId(self): 
+        return self._id 
+    
     def getDestination(self):
         return self._destination
 
@@ -42,7 +47,7 @@ class Pair:
 # Resource Functions 
 ########################################
 class Resource:
-    def __init__(self, tpLimit, id, optTput):
+    def __init__(self, tpLimit, idNum, optTput):
         self._tpUserLimit = tpLimit
         self._optimalTput = optTput
         self._currentTput = 0
@@ -50,7 +55,7 @@ class Resource:
         self._currentTputSetpoint = 0
         self._prevTputSetpoint = 0
         self._totUserWeights = 0
-        self._hashVal = id
+        self._hashVal = idNum
 
     def __hash__(self) -> int:
         return hash(id)
@@ -75,9 +80,6 @@ class Resource:
     
     def rightEdgeFunc(self, setpoint):
         return (1.25 * self._optimalTput) - (0.25 * setpoint)
-    
-    def leftEdgeFunc(self, setpoint):
-        return self._optimalTput/ np.sqrt(-setpoint + (.5 * self._optimalTput))
     
     def getActualTput(self):
         actualTput = self._currentTputSetpoint
@@ -118,6 +120,8 @@ class Network:
         self._pair_limits = [[] for _ in range(len(pairs))]
         self._destination_limits = [[] for _ in range(len(destinations))]
 
+        self._pair_tput = dict() # key = pair, value = (setpoint, tput)
+
     def __init__(self, num_resources, num_pairs, pairIndictorFunction, resourceIndicatorFunction):
         # Initialize resources
         self._resources = []
@@ -134,12 +138,13 @@ class Network:
 
         # Initialize pairs
         self._pairs = []
-        for _ in range(num_pairs):
+        for i in range(num_pairs):
             tp_limit =  100 # Adjust the range as needed, change this!!!! to be based on resource limits U_r / numPairsweighted 
             resource_indicies = random.sample(range(len(self._resources)), random.randint(1, len(self._resources))) # change this to just pick one
             resources = [self._resources[i] for i in resource_indicies]
             #pair = Pair(tp_limit, resources, random.random() * 10) #first resource is dest
-            pair = Pair(tp_limit, resources, 1)
+        
+            pair = Pair(i, tp_limit, resources, 1) # all pairs are equally weighted here 
             self._pairs.append(pair)
             
             #update destinations map
@@ -150,14 +155,12 @@ class Network:
 
         self._x_values = list()
         self._resource_data =  [[] for _ in range(len(self._resources))]
-        self._pair_data = [[] for _ in range(len(self._pairs))]
+        self._pair_data = defaultdict(list) 
         self._destination_data = [[] for _ in range(len(self._destinations))]
         self._destination_tput_setpoint = [[] for _ in range(len(self._destinations))]
-
         self._resource_limits =  [[] for _ in range(len(self._resources))]
         self._pair_limits = [[] for _ in range(len(self._pairs))]
         self._destination_limits = [[] for _ in range(len(self._destinations))]
-
         self._destination_optimal = [[] for _ in range(len(self._destinations))]
 
         
@@ -178,9 +181,14 @@ class Network:
                 #resource._tput += tput
             #pair._destination._currentTputSetpoint += tput
             #pair._destination._currentTput = pair._destination.getActualTput()
-    
+                
+    def getDestinations(self): 
+        return self._destinations
+
+    def getPairs(self): 
+        return self._pairs
+
     def updateResourceTput(self):
-        
         for dest in self._destinations:
             CalculatedSetpoint = 0
             CalculatedWeights = 0
@@ -204,7 +212,8 @@ class Network:
 
         i = 0
         for pair in self._pairs:
-            self._pair_data[i].append(pair.getTput())
+            self._pair_data[pair.getId()].append(pair.getTput())
+            # self._pair_data[i].append(pair.getTput())
             self._pair_limits[i].append(pair.getLimit())
             i += 1
 
@@ -219,7 +228,7 @@ class Network:
     def clearState(self):
         self._x_values = list()
         self._resource_data =  [[] for _ in range(len(self._resources))]
-        self._pair_data = [[] for _ in range(len(self._pairs))]
+        self._pair_data = defaultdict(list)
         self._destination_data = [[] for _ in range(len(self._destinations))]
         self._destination_data = [[] for _ in range(len(self._destinations))]
         self._resource_limits =  [[] for _ in range(len(self._resources))]
@@ -272,7 +281,7 @@ class Network:
             # if we do not have previous information about this resource 
             # set at the user specified limit 
             if dest._prevTputSetpoint == 0:
-                tput = min(dest._tpUserLimit,  (5 * dest._optimalTput - 1))
+                tput = min(dest._tpUserLimit,  (5 * dest._optimalTput))
                 dest._currentTputSetpoint = tput
                 dest._currentTput = dest.getActualTput()
                 dest._prevTputSetpoint = tput # this forces the gradient to be negative -- do we want this?
@@ -371,7 +380,6 @@ def main():
     data = myNetwork.simulate(numIterations)
     print(data)
 
-
     # save plots 
     timestamp_str = datetime.now().strftime("%m-%d_%H-%M-%S")
     folder_path = os.path.join('/Users/jennymao/Documents/repos/NetworkSimulation/', f"folder_{timestamp_str}/")
@@ -385,6 +393,7 @@ def main():
 
 
 
+
     ################################################
     # Plot 1: All Pairs 
     ################################################
@@ -393,13 +402,14 @@ def main():
     for i in range(len(data[1])):
         myLabel1 = "Pair" + str(i)+ "Throuput"
         myLabel2 = "Pair" + str(i) + "Limit"
-        plt.plot(data[0], data[1][i], label=myLabel1)
+        plt.plot(data[0], data[1][i], label=myLabel1) # this is fuckign breaking 
         plt.plot(data[0], data[2][i], label=myLabel2)
     plt.title('Pairs')
     plt.legend()
 
     plt.savefig(folder_path + "Pairs.png")
     plt.clf()
+    
 
 
 
@@ -444,6 +454,23 @@ def main():
     plt.savefig(folder_path + "Resources.png")
 
 
+    ################################################
+    # Plot 4: Pairs on Each Resource 
+    ################################################
+    destinations = myNetwork.getDestinations()
+    pairData = data[1]
+
+    fig_size = (10, 6)
+
+    for dest, pairs in destinations.items():
+        plt.figure(figsize=fig_size)
+        
+        for pair in pairs:
+            plt.plot(data[0], pairData[pair.getId()], label="Pair" + str(pair.getId()))
+
+        plt.title("Pairs on Destination " + str(dest._hashVal))
+        plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+        plt.savefig(folder_path + "Destination" + str(dest._hashVal) + "_Pairs_Plot.png", bbox_inches='tight')
 
 
 if __name__ == "__main__":
