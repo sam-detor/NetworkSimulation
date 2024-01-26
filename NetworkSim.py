@@ -118,7 +118,11 @@ class Network:
         self._pair_limits = [[] for _ in range(len(pairs))]
         self._destination_limits = [[] for _ in range(len(destinations))]
 
-    def __init__(self, num_resources, num_pairs, pairIndictorFunction, resourceIndicatorFunction):
+    def __init__(self, num_resources, num_pairs, externalTrafficProbability, pairIndictorFunction, resourceIndicatorFunction):
+
+        # If network has external traffic, the destinations will have fluctuating optimal capacities 
+        self._externalTrafficProbability = externalTrafficProbability
+
         # Initialize resources
         self._resources = []
         i = 0
@@ -262,12 +266,18 @@ class Network:
     # Optimizer Iteration 
     ########################################
     def optimizerIteration(self):
-        alpha = 1
+        alpha = 0.5
         beta = 0.75
         bigBeta = 0.6 #for when user limit exceeded
 
         #self.updateResourceTput()
         for dest in self._destinations:
+
+            # check if the destination limits should be changed to simulate external traffic 
+            if np.random.rand() < self._externalTrafficProbability:
+                # change the optimal tput to within 20% of the current optimal tput 
+                dest._optimalTput = dest._optimalTput * np.random.uniform(0.7, 1.3) 
+                print("Dest", dest._hashVal, "optimal tput changed to", dest._optimalTput)
         
             # if we do not have previous information about this resource 
             # set at the user specified limit 
@@ -364,9 +374,10 @@ def main():
     numResources = 4 
     numPairs = 20 
     numIterations = 30 
+    externalTrafficProbability = 0.2
 
     # initialize network simulation 
-    myNetwork = Network(numResources, numPairs, myPairIndicatorFunction,myResourceIndicatorFunction)
+    myNetwork = Network(numResources, numPairs, externalTrafficProbability, myPairIndicatorFunction,myResourceIndicatorFunction)
     myNetwork.printNetworkState()
     data = myNetwork.simulate(numIterations)
     print(data)
