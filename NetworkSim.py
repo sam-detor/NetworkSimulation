@@ -270,10 +270,12 @@ class Network:
     ########################################
     # Optimizer Iteration 
     ########################################
-    def optimizerIteration(self):
+    def optimizerIterationCebinae(self):
         alpha = 1
         beta = 0.75
         bigBeta = 0.6 #for when user limit exceeded
+        taxPercent = 0.99
+        rangeOfTaxedPpl = 5 #ie tax ppl w/in 5 units of throughput
 
         #self.updateResourceTput()
         for dest in self._destinations:
@@ -281,7 +283,7 @@ class Network:
             # if we do not have previous information about this resource 
             # set at the user specified limit 
             if dest._prevTputSetpoint == 0:
-                tput = min(dest._tpUserLimit,  (5 * dest._optimalTput))
+                tput = min(dest._tpUserLimit,  (5 * dest._optimalTput)) #ASK why 5
                 dest._currentTputSetpoint = tput
                 dest._currentTput = dest.getActualTput()
                 dest._prevTputSetpoint = tput # this forces the gradient to be negative -- do we want this?
@@ -289,6 +291,10 @@ class Network:
             
             # we have previous information to optimize on 
             else: 
+                dest._currentTputSetpoint = 0
+                for pair in self._destinations[dest]:
+                    dest._currentTputSetpoint += pair.getTput()
+                
                 dest._currentTput = dest.getActualTput()
                 deltaTput = dest._currentTput - dest._prevTput
                 deltaSetpoint = dest._currentTputSetpoint - dest._prevTputSetpoint
@@ -299,29 +305,38 @@ class Network:
                     gradient = 1 #hack for zero gradient, idk what to do here for sure
             
                 decision = ""
-            
+                tax = False
                 #adjust setpoint
-                if gradient >= 0 and dest._currentTputSetpoint < dest.getLimit():
+                if gradient >= 0 and dest._currentTputSetpoint < dest.getLimit(): #room for probing, ie not a bottleneck link
                     # increase setpoint up to user specified limit 
-                    newSetpoint = min(dest._tpUserLimit, (2 * dest._optimalTput - 1), dest._currentTputSetpoint + (alpha * dest._totUserWeights)) 
+                    #newSetpoint = min(dest._tpUserLimit, (2 * dest._optimalTput - 1), dest._currentTputSetpoint + (alpha * dest._totUserWeights)) 
                     decision = "increase"
-                elif dest._currentTput > dest.getLimit():
-                    newSetpoint = dest._currentTputSetpoint * bigBeta 
+
+                elif dest._currentTput > dest.getLimit(): #saturated, must tax biggest flows
+                    #newSetpoint = dest._currentTputSetpoint * bigBeta 
                     decision = "decrease: user limit"
-                else:
+                    tax = True
+                else: #saturated, must tax biggest flows
                     newSetpoint = dest._currentTputSetpoint * beta
                     decision = "decrease: opt"
+                    tax = True
                 
                 self.printDestState(dest, gradient, decision, newSetpoint)
                 dest._prevTputSetpoint = dest._currentTputSetpoint
                 dest._prevTput = dest._currentTput
             
-                dest._currentTputSetpoint = newSetpoint
+                #dest._currentTputSetpoint = newSetpoint
 
-            # propogate new setpoint to pairs
-            for pair in self._destinations[dest]:
-                newTput = dest._currentTputSetpoint * (pair.getWeight()/dest._totUserWeights)
-                pair.updateTput(newTput)
+                if not tax:
+                    for pair in self._destinations[dest]: #I don't think this is water filling
+                        newTput = pair.getTput() + (alpha * (pair.getWeight()/dest._totUserWeights))
+                        pair.updateTput(newTput)
+                else:
+                    self._destinations[dest].sort(key=lambda pair: pair.getTput()/(pair.getWeight()/dest._totUserWeights))
+                    maxTput = (self._destinations[dest])[0].getTput()/(self._destinations[dest])[0].getWeight()/dest._totUserWeights
+
+
+
 
 
         self.saveState()
@@ -332,7 +347,7 @@ class Network:
         self.init_tput()
         self.saveState()
         for i in range(numIterations):
-            self.optimizerIteration()
+            self.optimizerIterationCebinae()
         
         return self._x_values, self._pair_data, self._pair_limits, self._destination_data, \
                         self._destination_limits, self._destination_optimal, self._destination_tput_setpoint, \
@@ -382,7 +397,7 @@ def main():
 
     # save plots 
     timestamp_str = datetime.now().strftime("%m-%d_%H-%M-%S")
-    folder_path = os.path.join('/Users/jennymao/Documents/repos/NetworkSimulation/', f"folder_{timestamp_str}/")
+    folder_path = os.path.join('/Users/samdetor/networkSim', f"folder_{timestamp_str}/")
 
     # create the new folder
     try:
