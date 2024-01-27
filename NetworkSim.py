@@ -13,13 +13,17 @@ from collections import defaultdict
 # Pair Functions 
 ########################################
 class Pair:
-    def __init__(self, idNum, tpLimit, resources, weight):
+    def __init__(self, idNum, tpLimit, resources, weight, start=0, end=1):
         self._id = idNum
         self._tpLimit = tpLimit
-        self._resources = resources #first element in resource array is the destination
+        self._resources = resources # first element in resource array is the destination
         self._destination = resources[0]
         self._tput = 0
         self._weight = weight
+        self._start = start
+        self._end = end # percentage of time pair is active during simulation 
+        self._active = False 
+
 
     def updateLimit(self,new_limit):
         self._tpLimit = new_limit
@@ -105,10 +109,11 @@ class Resource:
 ########################################
 class Network:
     
-    def __init__(self, resources, pairs, destinations, pairIndictorFunction, resourceIndicatorFunction):
+    def __init__(self, resources, pairs, destinations, pairIndictorFunction, resourceIndicatorFunction, numPairsPerResource=0):
         self._pairs = pairs
         self._resources = resources
         self._destinations = destinations
+        self._numPairsPerResource = numPairsPerResource
         self._pairIndictorFunction = pairIndictorFunction
         self._resourceIndicatorFunction = resourceIndicatorFunction
         self._x_values = list()
@@ -120,10 +125,12 @@ class Network:
         self._pair_limits = [[] for _ in range(len(pairs))]
         self._destination_limits = [[] for _ in range(len(destinations))]
 
-    def __init__(self, num_resources, num_pairs, externalTrafficProbability, pairIndictorFunction, resourceIndicatorFunction):
+
+    def __init__(self, num_resources, num_pairs, externalTrafficProbability, pairIndictorFunction, resourceIndicatorFunction, numPairsPerResource=0):
 
         # If network has external traffic, the destinations will have fluctuating optimal capacities 
         self._externalTrafficProbability = externalTrafficProbability
+        self._numPairsPerResource = numPairsPerResource
 
         # Initialize resources
         self._resources = []
@@ -142,11 +149,38 @@ class Network:
         self._pairs = []
         for i in range(num_pairs):
             tp_limit =  100 # Adjust the range as needed, change this!!!! to be based on resource limits U_r / numPairsweighted 
-            resource_indicies = random.sample(range(len(self._resources)), random.randint(1, len(self._resources))) # change this to just pick one
-            resources = [self._resources[i] for i in resource_indicies]
+
+            # picking multiple resources 
+            #resource_indicies = random.sample(range(len(self._resources)), random.randint(1, len(self._resources))) 
+            #resources = [self._resources[i] for i in resource_indicies]
+
+            # if we are picking the resource randomly
+            if self._numPairsPerResource == 0: 
+                # picking one resource (destination) randomly 
+                resource_index = random.choice(range(len(self._resources)))
+                resource = [self._resources[resource_index]]
+            else: 
+                # picking the resource based on the number of pairs per resource 
+                resource_index = i // self._numPairsPerResource  # Use integer division (//) instead of modulus (%)
+                resource = [self._resources[resource_index]]
+
+            # this is variable weight pairs 
             #pair = Pair(tp_limit, resources, random.random() * 10) #first resource is dest
-        
-            pair = Pair(i, tp_limit, resources, 1) # all pairs are equally weighted here 
+                
+            # all pairs are equally weighted here 
+            weight = 1
+            if np.random.rand() < 0.25: 
+                start = 0 
+                end = 0.6
+                pair = Pair(i, tp_limit, resource, weight, start, end) 
+            elif np.random.rand() < 0.25:
+                start = 0.25
+                end = 1
+                pair = Pair(i, tp_limit, resource, weight, start, end)
+            else: 
+                pair = Pair(i, tp_limit, resource, weight) # all pairs are equally weighted here 
+
+
             self._pairs.append(pair)
             
             #update destinations map
@@ -175,14 +209,15 @@ class Network:
             tput = min(dest._tpUserLimit,  (5 * dest._optimalTput - 1))
             dest._currentTputSetpoint = tput
             dest._totUserWeights = 0 
-            for pair in self._destinations[dest]:
-                dest._totUserWeights += pair.getWeight()
-            for pair in self._destinations[dest]:
-                pair.updateTput(tput * pair.getWeight()/dest._totUserWeights)
+            # TODO: clean this part up 
+            #for pair in self._destinations[dest]:
+                #dest._totUserWeights += pair.getWeight()
+            #for pair in self._destinations[dest]:
+                #pair.updateTput(tput * pair.getWeight()/dest._totUserWeights)
             #for resource in pair._resources:
                 #resource._tput += tput
             #pair._destination._currentTputSetpoint += tput
-            #pair._destination._currentTput = pair._destination.getActualTput()
+            #pair._destination._currentTput += pair._destination.getActualTput()
                 
     def getDestinations(self): 
         return self._destinations
@@ -197,8 +232,9 @@ class Network:
             #dest._currentTputSetpoint = 0
             #dest.__totUserWeights = 0
             for pair in self._destinations[dest]:
-                CalculatedSetpoint += pair.getTput()
-                CalculatedWeights += pair.getWeight()
+                if pair._active: 
+                    CalculatedSetpoint += pair.getTput()
+                    CalculatedWeights += pair.getWeight()
             print("Dest", dest._hashVal)
             print("\t actual setpoint:", dest._currentTputSetpoint)
             print("\t calculated Setpoint:", CalculatedSetpoint)
@@ -274,12 +310,11 @@ class Network:
     ########################################
     def optimizerIteration(self):
         alpha = 0.5
-        beta = 0.75
-        bigBeta = 0.6 #for when user limit exceeded
+        beta = 0.9
+        bigBeta = 0.9 #for when user limit exceeded
 
         #self.updateResourceTput()
         for dest in self._destinations:
-
             # check if the destination limits should be changed to simulate external traffic 
             if np.random.rand() < self._externalTrafficProbability:
                 # change the optimal tput to within 20% of the current optimal tput 
@@ -288,12 +323,10 @@ class Network:
         
             # if we do not have previous information about this resource 
             # set at the user specified limit 
+            # TODO: fix this logic 
             if dest._prevTputSetpoint == 0:
-                tput = min(dest._tpUserLimit,  (5 * dest._optimalTput))
-                dest._currentTputSetpoint = tput
-                dest._currentTput = dest.getActualTput()
-                dest._prevTputSetpoint = tput # this forces the gradient to be negative -- do we want this?
-                dest._prevTput = dest._currentTput 
+                tput = min(dest._tpUserLimit,  (5 * dest._optimalTput)) 
+                newSetpoint = tput
             
             # we have previous information to optimize on 
             else: 
@@ -324,12 +357,21 @@ class Network:
                 dest._prevTputSetpoint = dest._currentTputSetpoint
                 dest._prevTput = dest._currentTput
             
-                dest._currentTputSetpoint = newSetpoint
+                #dest._currentTputSetpoint = newSetpoint
 
-            # propogate new setpoint to pairs
+            dest._currentTputSetpoint = 0 
+            # propagate new setpoint to pairs
             for pair in self._destinations[dest]:
-                newTput = dest._currentTputSetpoint * (pair.getWeight()/dest._totUserWeights)
-                pair.updateTput(newTput)
+                if pair._active: 
+                    newTput = newSetpoint * (pair.getWeight()/dest._totUserWeights)
+                    pair.updateTput(newTput)
+                    dest._currentTputSetpoint += newTput
+            
+            # can't get the actual currentTput until we calculate the actual setpoint. TODO: think about the logic of this more 
+            if dest._prevTputSetpoint == 0: 
+                dest._currentTput = dest.getActualTput()
+                dest._prevTputSetpoint = dest._currentTputSetpoint # this forces the gradient to be negative -- do we want this?
+                dest._prevTput = dest._currentTput 
 
 
         self.saveState()
@@ -340,6 +382,18 @@ class Network:
         self.init_tput()
         self.saveState()
         for i in range(numIterations):
+            percentComplete = (i/numIterations) 
+            for pair in self._pairs:
+                if pair._active: 
+                    if percentComplete > pair._end: 
+                        pair._active = False
+                        pair.updateTput(0)
+                        pair.getDestination()._totUserWeights -= pair.getWeight()
+                else:
+                    if pair._start <= percentComplete < pair._end: # within the pair's active range
+                        pair._active = True
+                        pair.getDestination()._totUserWeights += pair.getWeight()
+
             self.optimizerIteration()
         
         return self._x_values, self._pair_data, self._pair_limits, self._destination_data, \
@@ -379,12 +433,13 @@ def myResourceIndicatorFunction(pair):
 def main():
     #  network parameters 
     numResources = 4 
-    numPairs = 20 
-    numIterations = 30 
-    externalTrafficProbability = 0.2
+    numPairs = 12
+    numIterations = 100
+    externalTrafficProbability = 0
+    numPairsPerResource = 3 # 0 means random resource assignment, otherwise it is the number of pairs per resource
 
     # initialize network simulation 
-    myNetwork = Network(numResources, numPairs, externalTrafficProbability, myPairIndicatorFunction,myResourceIndicatorFunction)
+    myNetwork = Network(numResources, numPairs, externalTrafficProbability, myPairIndicatorFunction,myResourceIndicatorFunction, numPairsPerResource)
     myNetwork.printNetworkState()
     data = myNetwork.simulate(numIterations)
     print(data)
@@ -483,22 +538,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
-    
-
-
-    
-
-
-    
-  
-
-
-
-        
-
-
-
-
-
-    
+    main()    
