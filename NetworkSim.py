@@ -19,6 +19,7 @@ class Pair:
         self._resources = resources # first element in resource array is the destination
         self._destination = resources[0]
         self._tput = 0
+        self._proposedDecisions = list()
         self._currentSlots = 0
         self._prevSlots = 0
         self._weight = weight
@@ -309,8 +310,8 @@ class Network:
     ########################################
     def optimizerIteration(self):
         alpha = 0.5
-        beta = 0.9
-        bigBeta = 0.9 #for when user limit exceeded
+        beta = 0.5
+        bigBeta = 0.5 #for when user limit exceeded
 
         #self.updateResourceTput()
         for dest in self._destinations:
@@ -343,7 +344,7 @@ class Network:
                 #adjust setpoint
                 if gradient >= 0 and dest._currentTput < dest.getLimit():
                     # increase setpoint up to user specified limit 
-                    newSetpoint = min(math.floor(dest._tpUserLimit/dest.tputPerSlot), round(((2 * dest._optimalTput)/dest.tputPerSlot) - 1), dest._currentSlots + min(round((alpha * dest._totUserWeights)), 1)) 
+                    newSetpoint = max(min(math.floor(dest._tpUserLimit/dest.tputPerSlot), round(((2 * dest._optimalTput)/dest.tputPerSlot) - 1), dest._currentSlots + max(round((alpha * dest._totUserWeights)), 1)), 1)
                     if newSetpoint == math.floor(dest._tpUserLimit/dest.tputPerSlot):
                         decision = "can't increase above setpoint estimation"
                     elif newSetpoint == round(((2 * dest._optimalTput)/dest.tputPerSlot) - 1):
@@ -480,6 +481,8 @@ class Network:
                     if percentComplete > pair._end: 
                         pair._active = False
                         pair.updateTput(0)
+                        pair.getDestination()._currentSlots -= pair._currentSlots
+                        pair._currentSlots = 0
                         pair.getDestination()._totUserWeights -= pair.getWeight()
                 else:
                     if pair._start <= percentComplete < pair._end: # within the pair's active range
