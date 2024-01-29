@@ -19,6 +19,9 @@ class Pair:
         self._resources = resources # first element in resource array is the destination
         self._destination = resources[0]
         self._tput = 0
+        self._proposedDecisions = list()
+        self._currentSlots = 0
+        self._prevSlots = 0
         self._weight = weight
         self._start = start
         self._end = end # percentage of time pair is active during simulation 
@@ -51,13 +54,16 @@ class Pair:
 # Resource Functions 
 ########################################
 class Resource:
+    tputPerSlot = 1
     def __init__(self, tpLimit, idNum, optTput):
         self._tpUserLimit = tpLimit
         self._optimalTput = optTput
         self._currentTput = 0
         self._prevTput = 0
-        self._currentTputSetpoint = 0
-        self._prevTputSetpoint = 0
+        #self._currentTputSetpoint = 0
+        self._currentSlots = 0
+        self._prevSlots =0
+        #self._prevTputSetpoint = 0
         self._totUserWeights = 0
         self._hashVal = idNum
 
@@ -70,14 +76,8 @@ class Resource:
     def updateLimit(self,new_limit):
         self._tpUserLimit = new_limit
     
-    def updateTputSetpoint(self,tput):
-       self._tputSetpoint = tput
-    
     def getLimit(self):
         return self._tpUserLimit
-    
-    def getTput(self):
-       return self._tput
     
     def quadFunc(self, setpoint):
         return (-1/self._optimalTput) * (setpoint - self._optimalTput) * (setpoint - self._optimalTput) + self._optimalTput
@@ -85,23 +85,23 @@ class Resource:
     def rightEdgeFunc(self, setpoint):
         return (1.25 * self._optimalTput) - (0.25 * setpoint)
     
-    def getActualTput(self):
+    '''def getActualTput(self):
         actualTput = self._currentTputSetpoint
         # if greater than optimal tput, the actual tput will begin to decrease (neg gradient)
         if self._currentTputSetpoint > self._optimalTput: 
             actualTput = self.rightEdgeFunc(self._currentTputSetpoint)
 
-        return actualTput 
+        return actualTput '''
     
     
-    """  def getActualTput(self):
-        if(self._currentTputSetpoint - (1.5 * self._optimalTput) > 0 and self.rightEdgeFunc(self._currentTputSetpoint) < (self._optimalTput * 0.8)):
-            return self.rightEdgeFunc(self._currentTputSetpoint)
-        elif (-self._currentTputSetpoint + (.5 * self._optimalTput) > 0 and self.leftEdgeFunc(self._currentTputSetpoint) < (self._optimalTput * 0.8)):
-            return self.leftEdgeFunc(self._currentTputSetpoint)
-        else:
-            return self.quadFunc(self._currentTputSetpoint)
- """
+    def getActualTput(self):
+        #if(self._currentTputSetpoint - (1.5 * self._optimalTput) > 0 and self.rightEdgeFunc(self._currentTputSetpoint) < (self._optimalTput * 0.8)):
+            #return self.rightEdgeFunc(self._currentTputSetpoint)
+        #elif (-self._currentTputSetpoint + (.5 * self._optimalTput) > 0 and self.leftEdgeFunc(self._currentTputSetpoint) < (self._optimalTput * 0.8)):
+            #return self.leftEdgeFunc(self._currentTputSetpoint)
+        #else:
+        return self.quadFunc(self._currentSlots * self.tputPerSlot)
+
 
 
 ########################################
@@ -120,7 +120,7 @@ class Network:
         self._resource_data =  [[] for _ in range(len(resources))]
         self._pair_data = [[] for _ in range(len(pairs))]
         self._destination_data = [[] for _ in range(len(destinations))]
-        self._destination_tput_setpoint = [[] for _ in range(len(destinations))]
+        self._destination_slots = [[] for _ in range(len(destinations))]
         self._resource_limits =  [[] for _ in range(len(resources))]
         self._pair_limits = [[] for _ in range(len(pairs))]
         self._destination_limits = [[] for _ in range(len(destinations))]
@@ -136,8 +136,8 @@ class Network:
         self._resources = []
         i = 0
         for _ in range(num_resources):
-            tp_limit = random.randint(5,150)  # Adjust the range as needed
-            tp_optimal = random.randint(5,150)
+            tp_limit = random.randint(100,150)  # Adjust the range as needed
+            tp_optimal = random.randint(50,150)
             resource = Resource(tp_limit, i, tp_optimal)
             self._resources.append(resource)
             i += 1
@@ -193,7 +193,7 @@ class Network:
         self._resource_data =  [[] for _ in range(len(self._resources))]
         self._pair_data = defaultdict(list) 
         self._destination_data = [[] for _ in range(len(self._destinations))]
-        self._destination_tput_setpoint = [[] for _ in range(len(self._destinations))]
+        self._destination_slots = [[] for _ in range(len(self._destinations))]
         self._resource_limits =  [[] for _ in range(len(self._resources))]
         self._pair_limits = [[] for _ in range(len(self._pairs))]
         self._destination_limits = [[] for _ in range(len(self._destinations))]
@@ -206,8 +206,8 @@ class Network:
     def init_tput(self):
         for dest in self._destinations:
             #tput = random.randint(1,2 * dest._optimalTput)
-            tput = min(dest._tpUserLimit,  (5 * dest._optimalTput - 1))
-            dest._currentTputSetpoint = tput
+            slots = min(round((dest._tpUserLimit / 2) /dest.tputPerSlot),  round(((2 * dest._optimalTput)/dest.tputPerSlot) - 1)) #start half way inbetween user limit and zero
+            dest._currentSlots = slots
             dest._totUserWeights = 0 
             # TODO: clean this part up 
             #for pair in self._destinations[dest]:
@@ -236,7 +236,7 @@ class Network:
                     CalculatedSetpoint += pair.getTput()
                     CalculatedWeights += pair.getWeight()
             print("Dest", dest._hashVal)
-            print("\t actual setpoint:", dest._currentTputSetpoint)
+            print("\t actual setpoint:", dest._currentSlots * dest.tputPerSlot)
             print("\t calculated Setpoint:", CalculatedSetpoint)
 
 
@@ -250,14 +250,14 @@ class Network:
 
         i = 0
         for pair in self._pairs:
-            self._pair_data[pair.getId()].append(pair.getTput())
+            self._pair_data[pair.getId()].append(pair._currentSlots)
             # self._pair_data[i].append(pair.getTput())
             self._pair_limits[i].append(pair.getLimit())
             i += 1
 
         i = 0
         for dest in self._destinations:
-            self._destination_tput_setpoint[i].append(dest._prevTputSetpoint) # or current?
+            self._destination_slots[i].append(dest._prevSlots) # or current?
             self._destination_data[i].append(dest._currentTput)
             self._destination_limits[i].append(dest.getLimit())
             self._destination_optimal[i].append(dest._optimalTput)
@@ -276,21 +276,21 @@ class Network:
     def printDestState(self,dest, gradient, decision, newSetpoint):
         print("Dest " + str(dest._hashVal) + "State")
         print("\t current tput: ", dest._currentTput)
-        print("\t current tput setpoint: ", dest._currentTputSetpoint)
+        print("\t current slots: ", dest._currentSlots)
         print("\t prev tput : ", dest._prevTput)
-        print("\t prev tput setpoint: ", dest._prevTputSetpoint)
+        print("\t prev slots: ", dest._prevSlots)
         print("\t gradient: ", gradient)
         print("\t opt tput: ", dest._optimalTput)
         print("\t limit:", dest.getLimit())
         print("\t decision: ", decision)
-        print("\t new setpoint: ", newSetpoint)
+        print("\t new slots: ", newSetpoint)
         print("\t tot user weights: ", dest._totUserWeights)
         
     def printState(self):
         i = 0
         print("Resources\n")
         for resource in self._resources:
-            print("Resource ", i, ": Throuput: ", resource._currentTput, " Setpoint: ", resource._currentTputSetpoint, "Optimal: ", resource._optimalTput, " Limit: ", resource.getLimit(), "\n")
+            print("Resource ", i, ": Throuput: ", resource._currentTput, " Setpoint: ", resource._currentSlots, "Optimal: ", resource._optimalTput, " Limit: ", resource.getLimit(), "\n")
             i+=1
         
         i = 0
@@ -310,8 +310,8 @@ class Network:
     ########################################
     def optimizerIteration(self):
         alpha = 0.5
-        beta = 0.9
-        bigBeta = 0.9 #for when user limit exceeded
+        beta = 0.5
+        bigBeta = 0.5 #for when user limit exceeded
 
         #self.updateResourceTput()
         for dest in self._destinations:
@@ -322,17 +322,17 @@ class Network:
                 print("Dest", dest._hashVal, "optimal tput changed to", dest._optimalTput)
         
             # if we do not have previous information about this resource 
-            # set at the user specified limit 
+            # set halfway between user limit and zero 
             # TODO: fix this logic 
-            if dest._prevTputSetpoint == 0:
-                tput = min(dest._tpUserLimit,  (5 * dest._optimalTput)) 
-                newSetpoint = tput
+            if dest._prevSlots== 0:
+                slots = min(round((dest._tpUserLimit/2) /dest.tputPerSlot),  round(((2 * dest._optimalTput)/dest.tputPerSlot) - 1))
+                newSetpoint = slots
             
             # we have previous information to optimize on 
             else: 
                 dest._currentTput = dest.getActualTput()
                 deltaTput = dest._currentTput - dest._prevTput
-                deltaSetpoint = dest._currentTputSetpoint - dest._prevTputSetpoint
+                deltaSetpoint = dest._currentSlots - dest._prevSlots
 
                 if(deltaSetpoint != 0):
                     gradient = (deltaTput)/(deltaSetpoint)
@@ -340,37 +340,130 @@ class Network:
                     gradient = 1 #hack for zero gradient, idk what to do here for sure
             
                 decision = ""
-            
+                userLimitExceeded = False
                 #adjust setpoint
-                if gradient >= 0 and dest._currentTputSetpoint < dest.getLimit():
+                if gradient >= 0 and dest._currentTput < dest.getLimit():
                     # increase setpoint up to user specified limit 
-                    newSetpoint = min(dest._tpUserLimit, (2 * dest._optimalTput - 1), dest._currentTputSetpoint + (alpha * dest._totUserWeights)) 
-                    decision = "increase"
+                    newSetpoint = max(min(math.floor(dest._tpUserLimit/dest.tputPerSlot), round(((2 * dest._optimalTput)/dest.tputPerSlot) - 1), dest._currentSlots + max(round((alpha * dest._totUserWeights)), 1)), 1)
+                    if newSetpoint == math.floor(dest._tpUserLimit/dest.tputPerSlot):
+                        decision = "can't increase above setpoint estimation"
+                    elif newSetpoint == round(((2 * dest._optimalTput)/dest.tputPerSlot) - 1):
+                        decision = "can't increase or will go neg"
+                    else:
+                        decision = "increase"
                 elif dest._currentTput > dest.getLimit():
-                    newSetpoint = dest._currentTputSetpoint * bigBeta 
+                    newSetpoint = math.floor(dest._currentSlots * bigBeta)
                     decision = "decrease: user limit"
+                    userLimitExceeded = True
                 else:
-                    newSetpoint = dest._currentTputSetpoint * beta
+                    newSetpoint = math.floor(dest._currentSlots * beta)
                     decision = "decrease: opt"
+
+
+                for pair in self._destinations[dest]:
+                    pair._tput = pair._currentSlots * dest._currentTput/dest._prevSlots
                 
                 self.printDestState(dest, gradient, decision, newSetpoint)
-                dest._prevTputSetpoint = dest._currentTputSetpoint
+                deltaSlots = newSetpoint - dest._currentSlots
+                dest._prevSlots = dest._currentSlots
                 dest._prevTput = dest._currentTput
+                addedSlots = 0
+                if deltaSlots > 0:
+                    #idk if we give everyone weighted 1 or just give that amount??
+                    for pair in self._destinations[dest]:
+                        if pair._active: 
+                            newSlots = max(1,round(deltaSlots * (pair.getWeight()/dest._totUserWeights)))
+                            pair._currentSlots += newSlots
+                            #pair._tput += pair._currentSlots * dest._prevTput/dest._prevSlots
+                            addedSlots += newSlots
+                    dest._currentSlots += addedSlots
+                else:
+                    if(userLimitExceeded):
+                        dest._currentSlots = 0
+                        for pair in self._destinations[dest]:
+                            if pair._active: 
+                                #targetSlots = max(1, math.floor(beta * dest._prevSlots/dest._prevTput * (pair.getWeight()/dest._totUserWeights)))
+                                pair._currentSlots = max(math.floor(pair._currentSlots * beta), 1)
+                                #pair._currentTput = 
+                                dest._currentSlots += pair._currentSlots
+
+                    else:
+                        self._destinations[dest].sort(key=lambda pair: pair._tput/(pair.getWeight()/dest._totUserWeights))
+                        slotNotGiven = False
+                        maxIndex = len(self._destinations[dest]) - 1
+                        while(not slotNotGiven and maxIndex >= 0):
+                            if(self._destinations[dest][maxIndex]._currentSlots > 1 and self._destinations[dest][maxIndex]._active):
+                                self._destinations[dest][maxIndex]._currentSlots -= 1
+                                #self._destinations[dest][maxIndex]._tput -= dest._prevTput/dest._prevSlots
+                                dest._currentSlots -= 1
+                                slotNotGiven = True
+                            
+                            maxIndex -= 1
+                        
+                        if (not slotNotGiven):
+                            print("Couldn't decrease")
+
+
+
+                   
+                
+                
+
+
+                
             
                 #dest._currentTputSetpoint = newSetpoint
 
-            dest._currentTputSetpoint = 0 
+            #dest._currentTputSetpoint = 0 
             # propagate new setpoint to pairs
-            for pair in self._destinations[dest]:
-                if pair._active: 
-                    newTput = newSetpoint * (pair.getWeight()/dest._totUserWeights)
-                    pair.updateTput(newTput)
-                    dest._currentTputSetpoint += newTput
+            # slotsLeft = newSetpoint
+            # self._destinations[dest].sort(key=lambda pair: pair.getWeight()/dest._totUserWeights) # sorted by most weighted
+            # currentPair = 0
+
+            # for pair in self._destinations[dest]:
+            #     pair._prevSlots = pair._currentSlots
+            #     pair._currentSlots = 0
+            # while(slotsLeft > 0):
+            #     self._destinations[dest][currentPair]._currentSlots += 1
+            #     if currentPair >= len(self._destinations[dest]):
+            #         currentPair = 0
+            #     else:
+            # #         currentPair += 1
+            # dest._currentSlots = newSetpoint
+            # slotsLeft = newSetpoint
+            # for pair in self._destinations[dest]:
+            #     if pair._active: 
+            #         newSlots = max(1,round(newSetpoint * (pair.getWeight()/dest._totUserWeights)))
+            #         newTput = newSlots * dest.tputPerSlot
+            #         slotsLeft = slotsLeft - newSlots
+            #         pair.updateTput(newTput)
+            #         pair._prevSlots = pair._currentSlots
+            #         pair.currentSlots = newSlots
+            #         print("Pair ", pair.getId(), "has" , newSlots, "slots")
+            #         #dest._currentSlots += 1
+            # #print("Current dest slots: ", dest._currentSlots)
+            # #print("Slots left: ", slotsLeft)
+            # if slotsLeft > 0:
+            #     totDestWeight = dest._totUserWeights
+            #     self._destinations[dest].sort(key=lambda pair: pair.getWeight()/totDestWeight)
+            #     currentPair = 0
+            #     while(slotsLeft > 0):
+            #         #print("current pair is", currentPair)
+            #         if self._destinations[dest][currentPair]._active:
+            #             self._destinations[dest][currentPair]._currentSlots += 1
+            #             slotsLeft  = slotsLeft - 1
+            #             #print("Pair ", self._destinations[dest][currentPair].getId(), "got one extra slot")
+            #         if currentPair >= len(self._destinations[dest]) - 1:
+            #            currentPair = 0
+            #         else:
+            #             currentPair += 1
+
+
             
             # can't get the actual currentTput until we calculate the actual setpoint. TODO: think about the logic of this more 
-            if dest._prevTputSetpoint == 0: 
+            if dest._prevSlots == 0: 
                 dest._currentTput = dest.getActualTput()
-                dest._prevTputSetpoint = dest._currentTputSetpoint # this forces the gradient to be negative -- do we want this?
+                dest._prevSlots= dest._currentSlots # this forces the gradient to be negative -- do we want this?
                 dest._prevTput = dest._currentTput 
 
 
@@ -388,6 +481,8 @@ class Network:
                     if percentComplete > pair._end: 
                         pair._active = False
                         pair.updateTput(0)
+                        pair.getDestination()._currentSlots -= pair._currentSlots
+                        pair._currentSlots = 0
                         pair.getDestination()._totUserWeights -= pair.getWeight()
                 else:
                     if pair._start <= percentComplete < pair._end: # within the pair's active range
@@ -397,7 +492,7 @@ class Network:
             self.optimizerIteration()
         
         return self._x_values, self._pair_data, self._pair_limits, self._destination_data, \
-                        self._destination_limits, self._destination_optimal, self._destination_tput_setpoint, \
+                        self._destination_limits, self._destination_optimal, self._destination_slots, \
                         self._resource_data, self._resource_limits
         
 
@@ -446,7 +541,7 @@ def main():
 
     # save plots 
     timestamp_str = datetime.now().strftime("%m-%d_%H-%M-%S")
-    folder_path = os.path.join('/Users/jennymao/Documents/repos/NetworkSimulation/', f"folder_{timestamp_str}/")
+    folder_path = os.path.join('/Users/samdetor/networkSim/', f"folder_{timestamp_str}/")
 
     # create the new folder
     try:
