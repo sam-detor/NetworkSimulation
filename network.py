@@ -1,107 +1,10 @@
-import random
-import string
-import matplotlib.pyplot as plt
-import math
-from scipy.optimize import fsolve
+import random 
+import math 
 import numpy as np
-import os
-from datetime import datetime
 from collections import defaultdict
 
-
-########################################
-# Pair Functions 
-########################################
-class Pair:
-    def __init__(self, idNum, tpLimit, resources, weight, start=0, end=1):
-        self._id = idNum
-        self._tpLimit = tpLimit
-        self._resources = resources # first element in resource array is the destination
-        self._destination = resources[0]
-        self._tput = 0
-        self._proposedDecisions = list()
-        self._currentSlots = 0
-        self._prevSlots = 0
-        self._weight = weight
-        self._start = start
-        self._end = end # percentage of time pair is active during simulation 
-        self._active = False 
-
-
-    def updateLimit(self,new_limit):
-        self._tpLimit = new_limit
-    
-    def updateTput(self,tput):
-       self._tput = tput
-
-    def getLimit(self):
-        return self._tpLimit
-    
-    def getTput(self):
-       return self._tput
-    
-    def getWeight(self):
-       return self._weight
-
-    def getId(self): 
-        return self._id 
-    
-    def getDestination(self):
-        return self._destination
-
-
-########################################
-# Resource Functions 
-########################################
-class Resource:
-    tputPerSlot = 1
-    def __init__(self, tpLimit, idNum, optTput):
-        self._tpUserLimit = tpLimit
-        self._optimalTput = optTput
-        self._currentTput = 0
-        self._prevTput = 0
-        #self._currentTputSetpoint = 0
-        self._currentSlots = 0
-        self._prevSlots =0
-        #self._prevTputSetpoint = 0
-        self._totUserWeights = 0
-        self._hashVal = idNum
-
-    def __hash__(self) -> int:
-        return hash(id)
-    def __eq__(self,other):
-        if isinstance(other, Resource):
-            return self._hashVal == other._hashVal
-        
-    def updateLimit(self,new_limit):
-        self._tpUserLimit = new_limit
-    
-    def getLimit(self):
-        return self._tpUserLimit
-    
-    def quadFunc(self, setpoint):
-        return (-1/self._optimalTput) * (setpoint - self._optimalTput) * (setpoint - self._optimalTput) + self._optimalTput
-    
-    def rightEdgeFunc(self, setpoint):
-        return (1.25 * self._optimalTput) - (0.25 * setpoint)
-    
-    '''def getActualTput(self):
-        actualTput = self._currentTputSetpoint
-        # if greater than optimal tput, the actual tput will begin to decrease (neg gradient)
-        if self._currentTputSetpoint > self._optimalTput: 
-            actualTput = self.rightEdgeFunc(self._currentTputSetpoint)
-
-        return actualTput '''
-    
-    
-    def getActualTput(self):
-        #if(self._currentTputSetpoint - (1.5 * self._optimalTput) > 0 and self.rightEdgeFunc(self._currentTputSetpoint) < (self._optimalTput * 0.8)):
-            #return self.rightEdgeFunc(self._currentTputSetpoint)
-        #elif (-self._currentTputSetpoint + (.5 * self._optimalTput) > 0 and self.leftEdgeFunc(self._currentTputSetpoint) < (self._optimalTput * 0.8)):
-            #return self.leftEdgeFunc(self._currentTputSetpoint)
-        #else:
-        return self.quadFunc(self._currentSlots * self.tputPerSlot)
-
+from net_resource import Resource 
+from pair import Pair
 
 
 ########################################
@@ -109,13 +12,11 @@ class Resource:
 ########################################
 class Network:
     
-    def __init__(self, resources, pairs, destinations, pairIndictorFunction, resourceIndicatorFunction, numPairsPerResource=0):
+    def __init__(self, resources, pairs, destinations, numPairsPerResource=0):
         self._pairs = pairs
         self._resources = resources
         self._destinations = destinations
         self._numPairsPerResource = numPairsPerResource
-        self._pairIndictorFunction = pairIndictorFunction
-        self._resourceIndicatorFunction = resourceIndicatorFunction
         self._x_values = list()
         self._resource_data =  [[] for _ in range(len(resources))]
         self._pair_data = [[] for _ in range(len(pairs))]
@@ -126,7 +27,7 @@ class Network:
         self._destination_limits = [[] for _ in range(len(destinations))]
 
 
-    def __init__(self, num_resources, num_pairs, externalTrafficProbability, pairIndictorFunction, resourceIndicatorFunction, numPairsPerResource=0):
+    def __init__(self, num_resources, num_pairs, externalTrafficProbability, numPairsPerResource=0):
 
         # If network has external traffic, the destinations will have fluctuating optimal capacities 
         self._externalTrafficProbability = externalTrafficProbability
@@ -150,10 +51,6 @@ class Network:
         for i in range(num_pairs):
             tp_limit =  100 # Adjust the range as needed, change this!!!! to be based on resource limits U_r / numPairsweighted 
 
-            # picking multiple resources 
-            #resource_indicies = random.sample(range(len(self._resources)), random.randint(1, len(self._resources))) 
-            #resources = [self._resources[i] for i in resource_indicies]
-
             # if we are picking the resource randomly
             if self._numPairsPerResource == 0: 
                 # picking one resource (destination) randomly 
@@ -163,9 +60,6 @@ class Network:
                 # picking the resource based on the number of pairs per resource 
                 resource_index = i // self._numPairsPerResource  # Use integer division (//) instead of modulus (%)
                 resource = [self._resources[resource_index]]
-
-            # this is variable weight pairs 
-            #pair = Pair(tp_limit, resources, random.random() * 10) #first resource is dest
                 
             # all pairs are equally weighted here 
             weight = 1
@@ -198,10 +92,6 @@ class Network:
         self._pair_limits = [[] for _ in range(len(self._pairs))]
         self._destination_limits = [[] for _ in range(len(self._destinations))]
         self._destination_optimal = [[] for _ in range(len(self._destinations))]
-
-        
-        self._pairIndictorFunction = pairIndictorFunction
-        self._resourceIndicatorFunction = resourceIndicatorFunction
     
     def init_tput(self):
         for dest in self._destinations:
@@ -209,15 +99,7 @@ class Network:
             slots = min(round((dest._tpUserLimit / 2) /dest.tputPerSlot),  round(((2 * dest._optimalTput)/dest.tputPerSlot) - 1)) #start half way inbetween user limit and zero
             dest._currentSlots = slots
             dest._totUserWeights = 0 
-            # TODO: clean this part up 
-            #for pair in self._destinations[dest]:
-                #dest._totUserWeights += pair.getWeight()
-            #for pair in self._destinations[dest]:
-                #pair.updateTput(tput * pair.getWeight()/dest._totUserWeights)
-            #for resource in pair._resources:
-                #resource._tput += tput
-            #pair._destination._currentTputSetpoint += tput
-            #pair._destination._currentTput += pair._destination.getActualTput()
+
                 
     def getDestinations(self): 
         return self._destinations
@@ -229,8 +111,6 @@ class Network:
         for dest in self._destinations:
             CalculatedSetpoint = 0
             CalculatedWeights = 0
-            #dest._currentTputSetpoint = 0
-            #dest.__totUserWeights = 0
             for pair in self._destinations[dest]:
                 if pair._active: 
                     CalculatedSetpoint += pair.getTput()
@@ -402,63 +282,6 @@ class Network:
                         
                         if (not slotNotGiven):
                             print("Couldn't decrease")
-
-
-
-                   
-                
-                
-
-
-                
-            
-                #dest._currentTputSetpoint = newSetpoint
-
-            #dest._currentTputSetpoint = 0 
-            # propagate new setpoint to pairs
-            # slotsLeft = newSetpoint
-            # self._destinations[dest].sort(key=lambda pair: pair.getWeight()/dest._totUserWeights) # sorted by most weighted
-            # currentPair = 0
-
-            # for pair in self._destinations[dest]:
-            #     pair._prevSlots = pair._currentSlots
-            #     pair._currentSlots = 0
-            # while(slotsLeft > 0):
-            #     self._destinations[dest][currentPair]._currentSlots += 1
-            #     if currentPair >= len(self._destinations[dest]):
-            #         currentPair = 0
-            #     else:
-            # #         currentPair += 1
-            # dest._currentSlots = newSetpoint
-            # slotsLeft = newSetpoint
-            # for pair in self._destinations[dest]:
-            #     if pair._active: 
-            #         newSlots = max(1,round(newSetpoint * (pair.getWeight()/dest._totUserWeights)))
-            #         newTput = newSlots * dest.tputPerSlot
-            #         slotsLeft = slotsLeft - newSlots
-            #         pair.updateTput(newTput)
-            #         pair._prevSlots = pair._currentSlots
-            #         pair.currentSlots = newSlots
-            #         print("Pair ", pair.getId(), "has" , newSlots, "slots")
-            #         #dest._currentSlots += 1
-            # #print("Current dest slots: ", dest._currentSlots)
-            # #print("Slots left: ", slotsLeft)
-            # if slotsLeft > 0:
-            #     totDestWeight = dest._totUserWeights
-            #     self._destinations[dest].sort(key=lambda pair: pair.getWeight()/totDestWeight)
-            #     currentPair = 0
-            #     while(slotsLeft > 0):
-            #         #print("current pair is", currentPair)
-            #         if self._destinations[dest][currentPair]._active:
-            #             self._destinations[dest][currentPair]._currentSlots += 1
-            #             slotsLeft  = slotsLeft - 1
-            #             #print("Pair ", self._destinations[dest][currentPair].getId(), "got one extra slot")
-            #         if currentPair >= len(self._destinations[dest]) - 1:
-            #            currentPair = 0
-            #         else:
-            #             currentPair += 1
-
-
             
             # can't get the actual currentTput until we calculate the actual setpoint. TODO: think about the logic of this more 
             if dest._prevSlots == 0: 
@@ -494,143 +317,3 @@ class Network:
         return self._x_values, self._pair_data, self._pair_limits, self._destination_data, \
                         self._destination_limits, self._destination_optimal, self._destination_slots, \
                         self._resource_data, self._resource_limits
-        
-
-
-
-########################################
-# Indicator Functions 
-########################################
-
-# currently unused
-# TODO: add pair success rate indicator function 
-def myPairIndicatorFunction(pair, maxC, minCVal, gradient):
-    beta = 0.9
-    alpha = 1
-    if gradient < 0:
-        return minCVal * pair.getWeight() * beta
-    else:
-        return (maxC * pair.getWeight()/pair._destination._totUserWeights) + (alpha * pair.getWeight()/pair._destination._totUserWeights)
-    
-# currently unused 
-def myResourceIndicatorFunction(pair):
-    # if exceeded resource limit, calculate the new proportional allocation for pair  
-    if pair._resources[0]._currentTput > pair._resources[0].getLimit():
-        return pair._resources[0].getLimit() * pair.getWeight()/pair._resources[0]._totUserWeights
-    else:
-        return float('inf')
-
-
-
-
-
-
-def main():
-    #  network parameters 
-    numResources = 4 
-    numPairs = 12
-    numIterations = 100
-    externalTrafficProbability = 0
-    numPairsPerResource = 3 # 0 means random resource assignment, otherwise it is the number of pairs per resource
-
-    # initialize network simulation 
-    myNetwork = Network(numResources, numPairs, externalTrafficProbability, myPairIndicatorFunction,myResourceIndicatorFunction, numPairsPerResource)
-    myNetwork.printNetworkState()
-    data = myNetwork.simulate(numIterations)
-    print(data)
-
-    # save plots 
-    timestamp_str = datetime.now().strftime("%m-%d_%H-%M-%S")
-    folder_path = os.path.join('/Users/samdetor/networkSim/', f"folder_{timestamp_str}/")
-
-    # create the new folder
-    try:
-        os.makedirs(folder_path)
-        print(f"New folder '{folder_path}' created successfully.")
-    except OSError as e:
-        print(f"Error creating folder: {e}")
-
-
-
-
-    ################################################
-    # Plot 1: All Pairs 
-    ################################################
-        
-    #plt.subplot(3, 1, 1)  # 3 rows, 1 column, plot 1
-    for i in range(len(data[1])):
-        myLabel1 = "Pair" + str(i)+ "Throuput"
-        myLabel2 = "Pair" + str(i) + "Limit"
-        plt.plot(data[0], data[1][i], label=myLabel1) # this is fuckign breaking 
-        plt.plot(data[0], data[2][i], label=myLabel2)
-    plt.title('Pairs')
-    plt.legend()
-
-    plt.savefig(folder_path + "Pairs.png")
-    plt.clf()
-    
-
-
-
-    #############################################
-    # Plot 2: Destinations (1 plot for each dest)
-    #############################################
-    
-    #plt.subplot(3, 1, 3)  # 3 rows, 1 column, plot 3
-    for i in range(len(data[3])):
-        plt.clf()
-        myLabel1 = "Dest" + str(i) + "Throuput"
-        myLabel2 = "Dest" + str(i) + "Limit"
-        myLabel3 = "Dest" + str(i) + "Opt"
-        myLabel4 = "Dest" + str(i) + "Target"
-        plt.plot(data[0], data[3][i], label=myLabel1)
-        plt.plot(data[0], data[4][i], label=myLabel2)
-        plt.plot(data[0], data[5][i], label=myLabel3)
-        plt.plot(data[0], data[6][i], label=myLabel4)
-        plt.title("Destination" + str(i))
-        plt.legend()
-        plt.savefig(folder_path + "Destination" + str(i) + ".png")
-
-    plt.clf()
-
-    # how can i print out the goal setpoint  
-
-
-    ################################################
-    # Plot 3: All Resources 
-    ################################################
-        
-    #plt.subplot(3, 1, 2)  # 3 rows, 1 column, plot 2
-    print("Data 3:", data[7])
-    print("Data 3 len:", data[7])
-    for i in range(len(data[7])):
-        myLabel1 = "Resource" + str(i) + "Throuput"
-        myLabel2 = "Resource" + str(i) + "Limit"
-        plt.plot(data[0], data[7][i], label=myLabel1)
-        plt.plot(data[0], data[8][i], label=myLabel2)
-    plt.title('Resources')
-    plt.legend()
-    plt.savefig(folder_path + "Resources.png")
-
-
-    ################################################
-    # Plot 4: Pairs on Each Resource 
-    ################################################
-    destinations = myNetwork.getDestinations()
-    pairData = data[1]
-
-    fig_size = (10, 6)
-
-    for dest, pairs in destinations.items():
-        plt.figure(figsize=fig_size)
-        
-        for pair in pairs:
-            plt.plot(data[0], pairData[pair.getId()], label="Pair" + str(pair.getId()))
-
-        plt.title("Pairs on Destination " + str(dest._hashVal))
-        plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
-        plt.savefig(folder_path + "Destination" + str(dest._hashVal) + "_Pairs_Plot.png", bbox_inches='tight')
-
-
-if __name__ == "__main__":
-    main()    
