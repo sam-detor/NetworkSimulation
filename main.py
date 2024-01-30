@@ -1,13 +1,9 @@
-import set_random_seed
-
 import matplotlib.pyplot as plt
 from network import Network
 from datetime import datetime
 import os
-import random
 
 def main():
-    random.seed(10)
 
     #  network parameters 
     numResources = 4 

@@ -1,5 +1,3 @@
-import set_random_seed
-
 import random 
 import math 
 import numpy as np
@@ -30,6 +28,7 @@ class Network:
 
 
     def __init__(self, num_resources, num_pairs, externalTrafficProbability, numPairsPerResource=0):
+        random.seed(10) 
 
         # If network has external traffic, the destinations will have fluctuating optimal capacities 
         self._externalTrafficProbability = externalTrafficProbability

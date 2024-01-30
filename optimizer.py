@@ -1,5 +1,4 @@
-import set_random_seed
-
+import random
 import math 
 import numpy as np 
 
@@ -14,6 +13,7 @@ class Optimizer:
     # Optimizer Iteration 
     ########################################
     def optimizerIteration(self, network):
+        random.seed(10)
         alpha = 0.5
         beta = 0.5
         bigBeta = 0.5 #for when user limit exceeded

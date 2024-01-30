@@ -1,3 +1,4 @@
-import random 
+# import random 
 
-random.seed(10)
+# random_seed = 10
+# random.seed(random_seed)
