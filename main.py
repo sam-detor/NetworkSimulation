@@ -1,3 +1,5 @@
+import set_random_seed
+
 import matplotlib.pyplot as plt
 from network import Network
 from datetime import datetime

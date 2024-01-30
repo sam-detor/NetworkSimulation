@@ -1,3 +1,5 @@
+import set_random_seed
+
 import math 
 import numpy as np 
 
@@ -6,7 +8,6 @@ from pair import Pair
 
 class Optimizer: 
     def __init__(self):
-        # self.network = network
         pass
 
     ########################################
@@ -16,6 +17,8 @@ class Optimizer:
         alpha = 0.5
         beta = 0.5
         bigBeta = 0.5 #for when user limit exceeded
+
+        delta_n = [0 for i in range(len(network._pairs))]
 
         #network.updateResourceTput()
         for dest in network._destinations:
@@ -111,7 +114,7 @@ class Optimizer:
             if dest._prevSlots == 0: 
                 dest._currentTput = dest.getActualTput()
                 dest._prevSlots= dest._currentSlots # this forces the gradient to be negative -- do we want this?
-                dest._prevTput = dest._currentTput 
+                dest._prevTput = dest._currentTput
 
 
         network.saveState()
